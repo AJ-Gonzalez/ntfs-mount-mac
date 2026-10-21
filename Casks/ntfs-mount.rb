@@ -8,6 +8,7 @@ cask "ntfs-mount" do
   homepage "https://github.com/AJ-Gonzalez/ntfs-mount-mac"
 
   depends_on macos: ">= :sonoma"
+  depends_on arch: :arm64
 
   app "NTFSMount.app"
 
@@ -20,5 +21,8 @@ cask "ntfs-mount" do
 
     On macOS 26 or later, allow NTFSMount under
     System Settings > Menu Bar > Allow in the Menu Bar.
+
+    The app is ad-hoc signed. If macOS blocks it, run:
+      xattr -dr com.apple.quarantine /Applications/NTFSMount.app
   EOS
 end
