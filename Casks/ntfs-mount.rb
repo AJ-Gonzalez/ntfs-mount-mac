@@ -1,6 +1,6 @@
 cask "ntfs-mount" do
   version "1.0.0"
-  sha256 "PLACEHOLDER"
+  sha256 "8eed5a32a0eec569210468982be4ca3e5eee0b524c6f155b425427172f3edc89"
 
   url "https://github.com/AJ-Gonzalez/ntfs-mount-mac/releases/download/v#{version}/NTFSMount-#{version}.zip"
   name "NTFS Mount"
