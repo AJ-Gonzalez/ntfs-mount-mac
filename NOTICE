@@ -1,0 +1,12 @@
+NTFS Mount
+Copyright 2026 AJ Gonzalez
+
+This product bundles ntfs-3g (https://github.com/macos-fuse-t/ntfs-3g),
+licensed under GPL-2.0-or-later / LGPL-2.0-or-later. The bundled binary is
+installed at /usr/local/libexec/ntfsmount/ntfs-3g and is invoked as a
+separate process; its source is available from the URL above.
+
+This product requires FUSE-T (https://www.fuse-t.org), which is installed
+separately and is free for personal use.
+
+The application source in this repository is licensed under Apache-2.0.
