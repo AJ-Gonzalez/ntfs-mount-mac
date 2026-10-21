@@ -141,6 +141,7 @@ struct ContentView: View {
         VStack(alignment: .leading, spacing: 7) {
             Toggle("Mount new drives automatically", isOn: $model.autoMount)
             Toggle("Keep drives writable", isOn: $model.fightBack)
+            Toggle("Block disk sleep while mounted", isOn: $model.keepDisksAwake)
             Toggle("Launch at login", isOn: Binding(
                 get: { model.launchAtLogin },
                 set: { model.setLaunchAtLogin($0) }

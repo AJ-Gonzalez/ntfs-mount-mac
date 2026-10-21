@@ -18,15 +18,24 @@ final class AppModel: ObservableObject {
     @Published var fightBack: Bool {
         didSet { UserDefaults.standard.set(fightBack, forKey: Defaults.fightBack) }
     }
+    @Published var keepDisksAwake: Bool {
+        didSet {
+            UserDefaults.standard.set(keepDisksAwake, forKey: Defaults.keepDisksAwake)
+            updateSleepGuard()
+        }
+    }
+    @Published private(set) var stalledDevices: Set<String> = []
     @Published var launchAtLogin: Bool = false
 
     private enum Defaults {
         static let autoMount = "autoMount"
         static let fightBack = "fightBack"
+        static let keepDisksAwake = "keepDisksAwake"
         static let ignored = "ignoredVolumeUUIDs"
     }
 
     private var ignoredUUIDs: Set<String>
+    private let sleepGuard = DiskSleepGuard()
     private var lastAttempt: [String: Date] = [:]
     private var failureCount: [String: Int] = [:]
     private var refreshInFlight = false
@@ -42,8 +51,12 @@ final class AppModel: ObservableObject {
         if defaults.object(forKey: Defaults.fightBack) == nil {
             defaults.set(true, forKey: Defaults.fightBack)
         }
+        if defaults.object(forKey: Defaults.keepDisksAwake) == nil {
+            defaults.set(true, forKey: Defaults.keepDisksAwake)
+        }
         autoMount = defaults.bool(forKey: Defaults.autoMount)
         fightBack = defaults.bool(forKey: Defaults.fightBack)
+        keepDisksAwake = defaults.bool(forKey: Defaults.keepDisksAwake)
         ignoredUUIDs = Set(defaults.stringArray(forKey: Defaults.ignored) ?? [])
         launchAtLogin = SMAppService.mainApp.status == .enabled
 
@@ -84,8 +97,11 @@ final class AppModel: ObservableObject {
                     self.lastHelperCheck = Date()
                 }
                 let present = Set(enumerated.map(\.uuid))
+                let presentDevices = Set(enumerated.map(\.device))
                 self.ignoredUUIDs.formIntersection(present)
+                self.stalledDevices.formIntersection(presentDevices)
                 self.persistIgnored()
+                self.updateSleepGuard()
                 self.runAutomation()
             }
         }
@@ -102,6 +118,7 @@ final class AppModel: ObservableObject {
         let now = Date()
         for volume in volumes {
             guard !volume.isWritable, !ignoredUUIDs.contains(volume.uuid) else { continue }
+            guard !stalledDevices.contains(volume.device) else { continue }
             if volume.state == .readOnly && !fightBack { continue }
             if let last = lastAttempt[volume.device], now.timeIntervalSince(last) < 8 { continue }
             if let failures = failureCount[volume.device], failures >= 3,
@@ -111,6 +128,11 @@ final class AppModel: ObservableObject {
     }
 
     func mount(_ volume: NTFSVolume, automatic: Bool = false) {
+        if !automatic {
+            stalledDevices.remove(volume.device)
+        } else if stalledDevices.contains(volume.device) {
+            return
+        }
         guard !busyDevices.contains(volume.device) else { return }
         guard helperReady else {
             if !automatic { errorMessage = "Privileged helper is not installed. Click Install Helper." }
@@ -169,6 +191,7 @@ final class AppModel: ObservableObject {
         }
         if response.ok {
             failureCount[device] = 0
+            stalledDevices.remove(device)
             needsFDA = false
             if !automatic { errorMessage = nil }
             refresh(forceHelperCheck: false)
@@ -179,11 +202,29 @@ final class AppModel: ObservableObject {
         if response.needsFDA == true {
             needsFDA = true
         }
+
+        let errorText = response.error ?? ""
+        let looksLikeUSBStall = errorText.localizedCaseInsensitiveContains("Input/output error")
+            || errorText.localizedCaseInsensitiveContains("Error reading bootsector")
+        if looksLikeUSBStall {
+            let firstStall = stalledDevices.insert(device).inserted
+            if !automatic {
+                errorMessage = "USB bridge stopped responding. Replug the drive (often caused by disk sleep)."
+            } else if firstStall {
+                errorMessage = "USB bridge stopped responding on \(device). Replug the drive; disk sleep is now blocked while volumes are mounted."
+            }
+            return
+        }
+
         if !automatic {
             errorMessage = response.error ?? "Operation failed"
         } else if response.needsFDA == true {
             errorMessage = response.error
         }
+    }
+
+    private func updateSleepGuard() {
+        sleepGuard.setActive(keepDisksAwake && volumes.contains { $0.mountPoint != nil })
     }
 
     func reveal(_ volume: NTFSVolume) {
