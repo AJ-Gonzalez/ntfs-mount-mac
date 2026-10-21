@@ -25,6 +25,7 @@ final class AppModel: ObservableObject {
         }
     }
     @Published private(set) var stalledDevices: Set<String> = []
+    @Published private(set) var repairDevices: Set<String> = []
     @Published var launchAtLogin: Bool = false
 
     private enum Defaults {
@@ -100,6 +101,7 @@ final class AppModel: ObservableObject {
                 let presentDevices = Set(enumerated.map(\.device))
                 self.ignoredUUIDs.formIntersection(present)
                 self.stalledDevices.formIntersection(presentDevices)
+                self.repairDevices.formIntersection(presentDevices)
                 self.persistIgnored()
                 self.updateSleepGuard()
                 self.runAutomation()
@@ -119,6 +121,7 @@ final class AppModel: ObservableObject {
         for volume in volumes {
             guard !volume.isWritable, !ignoredUUIDs.contains(volume.uuid) else { continue }
             guard !stalledDevices.contains(volume.device) else { continue }
+            guard !repairDevices.contains(volume.device) else { continue }
             if volume.state == .readOnly && !fightBack { continue }
             if let last = lastAttempt[volume.device], now.timeIntervalSince(last) < 8 { continue }
             if let failures = failureCount[volume.device], failures >= 3,
@@ -130,7 +133,8 @@ final class AppModel: ObservableObject {
     func mount(_ volume: NTFSVolume, automatic: Bool = false) {
         if !automatic {
             stalledDevices.remove(volume.device)
-        } else if stalledDevices.contains(volume.device) {
+            repairDevices.remove(volume.device)
+        } else if stalledDevices.contains(volume.device) || repairDevices.contains(volume.device) {
             return
         }
         guard !busyDevices.contains(volume.device) else { return }
@@ -192,6 +196,7 @@ final class AppModel: ObservableObject {
         if response.ok {
             failureCount[device] = 0
             stalledDevices.remove(device)
+            repairDevices.remove(device)
             needsFDA = false
             if !automatic { errorMessage = nil }
             refresh(forceHelperCheck: false)
@@ -199,27 +204,31 @@ final class AppModel: ObservableObject {
         }
 
         failureCount[device, default: 0] += 1
-        if response.needsFDA == true {
-            needsFDA = true
-        }
+        let classified = FailureClassifier.classify(
+            response.error ?? "",
+            needsFDA: response.needsFDA == true
+        )
 
-        let errorText = response.error ?? ""
-        let looksLikeUSBStall = errorText.localizedCaseInsensitiveContains("Input/output error")
-            || errorText.localizedCaseInsensitiveContains("Error reading bootsector")
-        if looksLikeUSBStall {
-            let firstStall = stalledDevices.insert(device).inserted
-            if !automatic {
-                errorMessage = "USB bridge stopped responding. Replug the drive (often caused by disk sleep)."
-            } else if firstStall {
-                errorMessage = "USB bridge stopped responding on \(device). Replug the drive; disk sleep is now blocked while volumes are mounted."
+        switch classified.kind {
+        case .filesystem:
+            let firstReport = repairDevices.insert(device).inserted
+            stalledDevices.remove(device)
+            if !automatic || firstReport {
+                errorMessage = classified.message
             }
-            return
-        }
-
-        if !automatic {
-            errorMessage = response.error ?? "Operation failed"
-        } else if response.needsFDA == true {
-            errorMessage = response.error
+        case .usb:
+            let firstReport = stalledDevices.insert(device).inserted
+            repairDevices.remove(device)
+            if !automatic || firstReport {
+                errorMessage = classified.message
+            }
+        case .permission:
+            needsFDA = true
+            errorMessage = classified.message
+        case .busy, .notNTFS, .unknown:
+            if !automatic {
+                errorMessage = classified.message
+            }
         }
     }
 

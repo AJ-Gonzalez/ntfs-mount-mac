@@ -12,5 +12,6 @@ let package = Package(
         .target(name: "NTFSMountCore"),
         .executableTarget(name: "NTFSMountApp", dependencies: ["NTFSMountCore"]),
         .executableTarget(name: "ntfsmount-helper", dependencies: ["NTFSMountCore"]),
+        .testTarget(name: "NTFSMountCoreTests", dependencies: ["NTFSMountCore"]),
     ]
 )

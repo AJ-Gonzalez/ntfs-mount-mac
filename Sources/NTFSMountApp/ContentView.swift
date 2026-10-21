@@ -189,6 +189,13 @@ private struct VolumeRow: View {
                 statusPill
             }
 
+            if needsRepair {
+                Text("NTFS metadata error — repair with chkdsk /f on Windows")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             HStack(spacing: 10) {
                 if volume.isWritable {
                     Button("Unmount") { model.unmount(volume) }
@@ -227,7 +234,11 @@ private struct VolumeRow: View {
         }
     }
 
+    private var needsRepair: Bool { model.repairDevices.contains(volume.device) }
+    private var isStalled: Bool { model.stalledDevices.contains(volume.device) }
+
     private var iconColor: Color {
+        if needsRepair { return .red }
         switch volume.state {
         case .readWrite: return .green
         case .readOnly: return .orange
@@ -252,6 +263,8 @@ private struct VolumeRow: View {
     }
 
     private var pillText: String {
+        if needsRepair { return "REPAIR NEEDED" }
+        if isStalled { return "USB STALLED" }
         switch volume.state {
         case .readWrite: return "READ & WRITE"
         case .readOnly: return "READ ONLY"
@@ -260,6 +273,8 @@ private struct VolumeRow: View {
     }
 
     private var pillColor: Color {
+        if needsRepair { return .red }
+        if isStalled { return .orange }
         switch volume.state {
         case .readWrite: return .green
         case .readOnly: return .orange

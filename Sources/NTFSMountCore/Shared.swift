@@ -64,31 +64,57 @@ public struct RunResult: Sendable {
 public enum Shell {
     @discardableResult
     public static func run(_ path: String, _ args: [String], timeout: TimeInterval = 60) -> RunResult {
+        let fileManager = FileManager.default
+        let token = UUID().uuidString
+        let outURL = fileManager.temporaryDirectory.appendingPathComponent("ntfsmount-out-\(token)")
+        let errURL = fileManager.temporaryDirectory.appendingPathComponent("ntfsmount-err-\(token)")
+        fileManager.createFile(atPath: outURL.path, contents: nil,
+                               attributes: [.posixPermissions: 0o600])
+        fileManager.createFile(atPath: errURL.path, contents: nil,
+                               attributes: [.posixPermissions: 0o600])
+        defer {
+            try? fileManager.removeItem(at: outURL)
+            try? fileManager.removeItem(at: errURL)
+        }
+
+        guard let outHandle = try? FileHandle(forWritingTo: outURL),
+              let errHandle = try? FileHandle(forWritingTo: errURL) else {
+            return RunResult(status: 127, stdout: "", stderr: "cannot create output files")
+        }
+
         let process = Process()
         process.executableURL = URL(fileURLWithPath: path)
         process.arguments = args
-        let out = Pipe()
-        let err = Pipe()
-        process.standardOutput = out
-        process.standardError = err
+        process.standardOutput = outHandle
+        process.standardError = errHandle
 
         let done = DispatchSemaphore(value: 0)
         process.terminationHandler = { _ in done.signal() }
         do {
             try process.run()
         } catch {
+            try? outHandle.close()
+            try? errHandle.close()
             return RunResult(status: 127, stdout: "", stderr: error.localizedDescription)
         }
+
+        var timedOut = false
         if done.wait(timeout: .now() + timeout) == .timedOut {
+            timedOut = true
             process.terminate()
             _ = done.wait(timeout: .now() + 5)
-            return RunResult(status: 124, stdout: "", stderr: "timed out")
         }
 
-        let outData = out.fileHandleForReading.readDataToEndOfFile()
-        let errData = err.fileHandleForReading.readDataToEndOfFile()
+        try? outHandle.close()
+        try? errHandle.close()
+
+        // Regular files, not pipes: ntfs-3g may leave a daemon holding the
+        // inherited descriptors open, which would make readDataToEndOfFile hang.
+        let outData = (try? Data(contentsOf: outURL)) ?? Data()
+        let errData = (try? Data(contentsOf: errURL)) ?? Data()
+        let status: Int32 = timedOut ? 124 : process.terminationStatus
         return RunResult(
-            status: process.terminationStatus,
+            status: status,
             stdout: String(decoding: outData, as: UTF8.self),
             stderr: String(decoding: errData, as: UTF8.self)
         )
