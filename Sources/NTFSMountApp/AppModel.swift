@@ -120,6 +120,10 @@ final class AppModel: ObservableObject {
         lastAttempt[volume.device] = Date()
 
         DispatchQueue.global(qos: .userInitiated).async {
+            if volume.state == .readOnly {
+                _ = HelperClient.call(["unmount", volume.device], timeout: 30)
+                Thread.sleep(forTimeInterval: 0.4)
+            }
             let response = HelperClient.call(["mount", volume.device])
             DispatchQueue.main.async {
                 self.busyDevices.remove(volume.device)
